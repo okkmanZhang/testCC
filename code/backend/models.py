@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Boolean
-from database import Base
+from code.backend.models.database import Base
 
 class TodoModel(Base):
     __tablename__ = "todos"
@@ -9,4 +9,6 @@ class TodoModel(Base):
     completed = Column(Boolean, default=False)
     category = Column(String, default="General")
     priority = Column(String, default="Medium")
+
+
 

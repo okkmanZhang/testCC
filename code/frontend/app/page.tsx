@@ -102,7 +102,7 @@ export default function TodoUI() {
               <div className="bg-blue-700 p-2 rounded-lg shadow-md">
                 <ListTodo className="text-white" size={24} />
               </div>
-              <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">AU Payroll Assistant</h1>
+              <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">AU PR Assistant</h1>
             </div>
             <div className="flex items-center gap-2 text-slate-500 bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-sm">
               <Calendar size={14} />
@@ -228,7 +228,7 @@ export default function TodoUI() {
         
         <footer className="mt-8 text-center">
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">
-            AU Compliance Framework v1.0
+            AU PR Compliance Framework v1.0
           </p>
         </footer>
       </div>

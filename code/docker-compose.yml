@@ -1,0 +1,16 @@
+# docker-compose.yml
+services:
+  db:
+    image: pgvector/pgvector:pg16   # ← 替换原来的 postgres:16
+    container_name: payroll_db
+    environment:
+      POSTGRES_DB: payroll_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

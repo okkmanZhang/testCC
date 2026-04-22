@@ -1,4 +1,4 @@
-from database import engine
+from code.backend.models.database import engine
 
 try:
     with engine.connect() as connection:
