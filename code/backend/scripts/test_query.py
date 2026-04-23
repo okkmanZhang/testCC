@@ -64,3 +64,15 @@ if __name__ == "__main__":
     for q in queries:
         search(q, top_k=3)
         print("\n")
+
+# Add this temporarily to scripts/test_query.py bottom
+if __name__ == "__main__":
+    search("under 16 years of age junior rate percentage", top_k=5)        
+
+# Add to scripts/test_query.py temporarily
+if __name__ == "__main__":
+    search("Table 4 minimum rates clause 17.1 adult retail employee level 3", top_k=3)    
+
+# update test_query.py bottom temporarily
+if __name__ == "__main__":
+    search("overtime hours threshold full-time 38 hours per week clause 26", top_k=3)    

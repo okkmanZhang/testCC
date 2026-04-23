@@ -17,18 +17,51 @@ Your job is to answer payroll questions accurately using ONLY the Award clauses 
 Rules:
 - Always cite the specific clause or schedule number (e.g. "clause 18.1", "Schedule B.3")
 - If calculating pay, show the step-by-step breakdown
-- If the context does not contain enough information to answer, say so clearly
 - Never guess or use knowledge outside the provided context
 - Amounts are in AUD
+- "public holiday entitlement" or "rostered day" or "not working on public holiday" → always include "clause 28 public holiday entitlement part-time rostered day paid"
+
+Reading rate tables:
+- Tables show columns left to right: Ordinary hours | Mon-Fri | Saturday | Sunday | Public holiday
+- Percentage headers (100%, 125%, 150%, 225% etc.) are the penalty multipliers for each column
+- Dollar amounts below each header are the actual hourly rates for that condition
+- "Under 16 years of age" row applies to employees aged 15 and below
+- To find a rate: locate the correct age row, then find the correct day-type column
+
+Example: "Under 16 years of age" row, "Public holiday" column = $26.89/hr for Level 1
+This means: junior base rate × 45% × 225% public holiday penalty
+
+If a table row and column combination is visible in the context, you MUST use that value — 
+do not say the information is unavailable.
 """
 
 REWRITE_PROMPT = """Convert the user's payroll question into 3 short search queries 
 to find relevant clauses in the General Retail Industry Award 2020.
 
-Return ONLY a JSON array of 3 strings, no explanation.
-Example: ["junior rates percentage age", "saturday penalty rate retail", "16 year old minimum wage"]
-"""
+Age mapping rules (apply these when generating queries):
+- age 15 or "under 16" → use "under 16 years of age junior rate"
+- age 16 → use "16 years of age junior rate"
+- age 17 → use "17 years of age junior rate"
+- age 18-20 → use "{age} years of age junior rate"
+- public holiday → always include "public holiday penalty rate 225%"
+- casual → always include "casual loading 25 percent clause 13"
+- sunday → always include "sunday penalty rate 150%"
+- saturday → always include "saturday penalty rate 125%"
 
+Adult rate rules:
+- If NO age is mentioned, the question is about the ADULT rate — always include "Table 4 minimum rates retail employee adult" as one query
+- "minimum rate" or "minimum hourly rate" without an age → use "Table 4 minimum rates clause 17.1 adult"
+- Never generate junior rate queries unless an age under 21 is explicitly mentioned
+
+Overtime rules:
+- "overtime" or "extra hours" → always include "overtime 38 hours per week full-time clause 26"
+- "part-time overtime" → always include "part-time overtime guaranteed hours clause 10.8"
+- "casual overtime" → always include "casual overtime 38 hours per week"
+
+Return ONLY a JSON array of 3 strings, no explanation.
+Example for "when does overtime apply":
+["overtime 38 hours per week full-time clause 26", "ordinary hours span retail employee", "overtime rates Table 11"]
+"""
 
 def get_azure_client() -> AzureOpenAI:
     return AzureOpenAI(
@@ -147,6 +180,9 @@ def answer_question(question: str) -> Dict:
 
     # Step 3: build context
     context = build_context(chunks)
+    # print("=== CONTEXT SENT TO LLM ===")
+    # print(context[:2000])
+    # print("=== END CONTEXT ===")
 
     # Step 4: generate
     user_message = f"""Use the following Award clauses to answer the question.

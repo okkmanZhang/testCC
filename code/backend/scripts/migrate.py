@@ -39,6 +39,28 @@ def migrate():
             USING gin(to_tsvector('english', chunk_text))
         """))
 
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS award_rates (
+                id              SERIAL PRIMARY KEY,
+                award_id        TEXT NOT NULL,
+                classification  TEXT NOT NULL,
+                employment_type TEXT NOT NULL,
+                age_min         INT,
+                age_max         INT,
+                day_type        TEXT NOT NULL,
+                rate_per_hour   NUMERIC(8,4) NOT NULL,
+                rate_multiplier NUMERIC(6,4) NOT NULL,
+                clause_ref      TEXT,
+                effective_date  DATE NOT NULL,
+                created_at      TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS award_rates_lookup_idx
+            ON award_rates (award_id, classification, employment_type, day_type)
+        """))        
+
         conn.commit()
         print("✅ Migration complete")
 

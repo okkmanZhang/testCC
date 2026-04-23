@@ -1,237 +1,470 @@
 "use client";
-import React, { useEffect, useState } from 'react';
-import { Plus, CheckCircle2, Circle, Trash2, ListTodo, Loader2, Calendar } from 'lucide-react';
-import { Todo } from '@/types/todo';
-import { toast } from 'sonner';
 
-export default function TodoUI() {
-  const [todos, setTodos] = useState<Todo[]>([]);
-  const [input, setInput] = useState<string>('');
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+import { useState, useRef, useEffect } from "react";
+import { Send, Calculator, MessageSquare, Loader2, ChevronDown } from "lucide-react";
+import { toast } from "sonner";
 
-  // Australian Date Formatter (DD/MM/YYYY)
-  const today = new Intl.DateTimeFormat('en-AU', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric'
-  }).format(new Date());
+const API = "http://localhost:8000/api/v1";
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+  sources?: Source[];
+}
+
+interface Source {
+  ref: string;
+  page: number | null;
+  similarity: number;
+}
+
+interface RateResult {
+  classification: string;
+  employment_type: string;
+  age: number | null;
+  work_date: string;
+  day_type: string;
+  start_time: string;
+  end_time: string;
+  hours_worked: number;
+  rate_per_hour: number;
+  rate_multiplier: number;
+  total_pay: number;
+  clause_ref: string;
+  breakdown: string;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const CLASSIFICATIONS = [
+  "retail_employee_level_1",
+  "retail_employee_level_2",
+  "retail_employee_level_3",
+  "retail_employee_level_4",
+  "retail_employee_level_5",
+  "retail_employee_level_6",
+  "retail_employee_level_7",
+  "retail_employee_level_8",
+];
+
+const EMP_TYPES = ["full_time", "part_time", "casual"];
+
+function formatLabel(s: string) {
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// ── Sub-components ───────────────────────────────────────────────────────────
+
+function Tag({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <span style={{ color: "var(--muted)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "var(--mono)" }}>
+        {label}
+      </span>
+      <span style={{ color: "var(--text-dim)", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function SourceBadge({ source }: { source: Source }) {
+  const pct = Math.round(source.similarity * 100);
+  const color = pct > 60 ? "var(--green)" : pct > 40 ? "var(--amber)" : "var(--muted)";
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      background: "var(--bg)", border: "1px solid var(--border)",
+      borderRadius: 4, padding: "2px 8px", fontSize: 11,
+      fontFamily: "'IBM Plex Mono', monospace", color: "var(--text-dim)"
+    }}>
+      <span style={{ color, fontSize: 8 }}>●</span>
+      {source.ref} {source.page ? `p.${source.page}` : ""} {pct}%
+    </span>
+  );
+}
+
+// ── Chat Panel ───────────────────────────────────────────────────────────────
+
+function ChatPanel() {
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: "assistant",
+      content: "Ask me anything about the General Retail Industry Award [MA000004]. I'll cite the relevant clauses.",
+    },
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const fetchTodos = async () => {
-      try {
-        const res = await fetch('http://localhost:8000/api/todos');
-        if (!res.ok) throw new Error('Server connection failed');
-        const data = await res.json();
-        setTodos(data);
-      } catch (error) {
-        toast.error('Unable to connect to the AU Payroll Server. Please check backend status.');
-        console.error(error);
-      } finally {
-        setIsInitialLoading(false);
-      }
-    };
-    fetchTodos();
-  }, []);
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-  const addTodo = async () => {
-    if (!input.trim()) return;
-    setIsSubmitting(true);
+  async function sendQuestion(question: string) {
+    if (!question.trim() || loading) return;
+    setMessages((m) => [...m, { role: "user", content: question }]);
+    setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/api/todos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: input }),
+      const res = await fetch(`${API}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to add task');
-      }
-
-      const newTodo = await response.json();
-      setTodos([...todos, newTodo]);
-      setInput('');
-      toast.success('Task synchronised with AU Database');
-    } catch (error: any) {
-      toast.error(error.message || 'Network connection timeout');
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      setMessages((m) => [...m, {
+        role: "assistant",
+        content: data.answer,
+        sources: data.sources,
+      }]);
+    } catch {
+      toast.error("Failed to reach the API");
+      setMessages((m) => [...m, { role: "assistant", content: "Error: could not reach the API." }]);
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
-  };
+  }
 
-  const deleteTodo = async (id: number) => {
-    try {
-      const response = await fetch(`http://localhost:8000/api/todos/${id}`, {
-        method: 'DELETE',
-      });
+  async function send() {
+    if (!input.trim() || loading) return;
+    const question = input.trim();
+    setInput("");
+    await sendQuestion(question);
+  }
 
-      if (response.ok) {
-        setTodos(todos.filter(t => t.id !== id));
-        toast.success('Task removed');
-      }
-    } catch (error) {
-      console.error("Deletion failed:", error);
-    }
-  };
+  function handleCopy(text: string, idx: number) {
+    navigator.clipboard.writeText(text);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx(null), 1500);
+  }
 
-  const toggleTodo = async (id: number) => {
-    try {
-      const response = await fetch(`http://localhost:8000/api/todos/${id}/toggle`, {
-        method: 'PUT',
-      });
+  function handleRetry(text: string) {
+    if (loading) return;
+    sendQuestion(text);
+  }
 
-      if (response.ok) {
-        const updatedTodo = await response.json();
-        setTodos(todos.map(t => t.id === id ? updatedTodo : t));
-      }
-    } catch (error) {
-      console.error("Status update failed:", error);
-    }
-  };
+  const iconBtnStyle = (active?: boolean) => ({
+    background: "none",
+    border: "1px solid var(--border)",
+    borderRadius: 4,
+    padding: "3px 7px",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 10,
+    color: active ? "var(--green)" : "var(--muted)",
+    fontFamily: "'IBM Plex Mono', monospace",
+    transition: "all 0.15s",
+    whiteSpace: "nowrap" as const,
+  });
 
   return (
-    <div className="min-h-screen bg-slate-50 p-8">
-      <div className="max-w-2xl mx-auto">
-
-        {/* Header Section */}
-        <header className="flex flex-col gap-1 mb-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="bg-blue-700 p-2 rounded-lg shadow-md">
-                <ListTodo className="text-white" size={24} />
-              </div>
-              <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">AU PR Assistant</h1>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px", display: "flex", flexDirection: "column", gap: 20 }}>
+        {messages.map((msg, i) => (
+          <div key={i} style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: msg.role === "user" ? "flex-end" : "flex-start" }}>
+            <div style={{
+              maxWidth: "85%",
+              background: msg.role === "user" ? "var(--amber)" : "var(--surface)",
+              color: msg.role === "user" ? "#0e0f11" : "var(--text)",
+              border: msg.role === "assistant" ? "1px solid var(--border)" : "none",
+              borderRadius: msg.role === "user" ? "12px 12px 2px 12px" : "2px 12px 12px 12px",
+              padding: "10px 14px",
+              fontSize: 13,
+              lineHeight: 1.65,
+              whiteSpace: "pre-wrap",
+              fontWeight: msg.role === "user" ? 500 : 400,
+            }}>
+              {msg.content}
             </div>
-            <div className="flex items-center gap-2 text-slate-500 bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-sm">
-              <Calendar size={14} />
-              <span className="text-xs font-bold">{today}</span>
-            </div>
-          </div>
-          <p className="text-sm text-slate-500 ml-12">Compliance & Task Management</p>
-        </header>
 
-        {/* Statistics Grid */}
-        <div className="grid grid-cols-2 gap-4 mb-8">
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 hover:border-blue-200 transition-colors">
-            <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">In Progress</p>
-            <p className="text-3xl font-black text-slate-900">{todos.filter(t => !t.completed).length}</p>
-          </div>
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 hover:border-green-200 transition-colors">
-            <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Finalised</p>
-            <p className="text-3xl font-black text-green-600">{todos.filter(t => t.completed).length}</p>
-          </div>
-        </div>
-
-        {/* Input Section */}
-        <div className="flex gap-2 mb-8">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="e.g., Organise Superannuation for Q3..."
-            disabled={isSubmitting}
-            className="flex-1 p-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all bg-white shadow-sm text-slate-900 font-medium placeholder:text-slate-400"
-          />
-          <button 
-            onClick={addTodo} 
-            disabled={isSubmitting}
-            className="bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-blue-200"
-          >
-            {isSubmitting ? <Loader2 className="animate-spin" size={20} /> : <Plus size={20} />} 
-            ADD
-          </button>
-        </div>
-
-        {/* Task List Container */}
-        <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-200 overflow-hidden">
-          {isInitialLoading ? (
-            <div className="p-20 text-center flex flex-col items-center gap-3">
-              <Loader2 className="animate-spin text-blue-600" size={32} />
-              <p className="text-slate-500 font-medium">Initialising dashboard...</p>
-            </div>
-          ) : todos.length === 0 ? (
-            <div className="p-20 text-center">
-              <p className="text-slate-400 font-medium">No active tasks found</p>
-            </div>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {todos.map((todo) => (
-                <li
-                  key={todo.id}
-                  className={`p-5 transition-all duration-300 ${
-                    todo.priority === 'High' && !todo.completed
-                      ? 'bg-red-50/30 border-l-4 border-l-red-600'
-                      : 'border-l-4 border-l-transparent hover:bg-slate-50/50'
-                    }`}
+            {/* Action buttons — only for user messages */}
+            {msg.role === "user" && (
+              <div style={{ display: "flex", gap: 4 }}>
+                <button
+                  style={iconBtnStyle(copiedIdx === i)}
+                  onClick={() => handleCopy(msg.content, i)}
+                  title="Copy question"
                 >
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-5">
-                      <button
-                        onClick={() => toggleTodo(todo.id)}
-                        className="group flex-shrink-0 transition-transform active:scale-90"
-                      >
-                        {todo.completed ? (
-                          <CheckCircle2 className="text-green-500" size={26} />
-                        ) : (
-                          <Circle className="text-slate-300 group-hover:text-blue-600" size={26} />
-                        )}
-                      </button>
+                  {copiedIdx === i ? (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  ) : (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  )}
+                  {copiedIdx === i ? "copied" : "copy"}
+                </button>
+                <button
+                  style={iconBtnStyle()}
+                  onClick={() => handleRetry(msg.content)}
+                  disabled={loading}
+                  title="Re-send this question"
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/></svg>
+                  retry
+                </button>
+              </div>
+            )}
 
-                      <div className="flex flex-col">
-                        <div className="flex items-center gap-3 flex-wrap">
-                          <p className={`text-lg font-bold transition-all ${
-                            todo.completed ? 'text-slate-400 line-through decoration-2' : 'text-slate-900'
-                          }`}>
-                            {todo.content}
-                          </p>
+            {/* Source badges — only for assistant messages */}
+            {msg.role === "assistant" && msg.sources && msg.sources.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxWidth: "85%" }}>
+                {msg.sources.slice(0, 5).map((s, j) => <SourceBadge key={j} source={s} />)}
+              </div>
+            )}
+          </div>
+        ))}
 
-                          {todo.priority === 'High' && !todo.completed && (
-                            <span className="animate-pulse inline-flex items-center bg-red-600 text-white text-[10px] px-2 py-0.5 rounded-full font-black tracking-tighter uppercase shadow-sm">
-                              Urgent
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-3 mt-2">
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-100 px-2 py-1 rounded-md border border-slate-200">
-                            {todo.category === 'Tax' ? 'PAYG / Tax' : todo.category}
-                          </span>
-                          <span className={`text-[10px] font-black flex items-center gap-1.5 uppercase ${
-                            todo.priority === 'High' ? 'text-red-700' :
-                            todo.priority === 'Low' ? 'text-slate-400' : 'text-blue-700'
-                          }`}>
-                            <div className={`w-1.5 h-1.5 rounded-full ${
-                              todo.priority === 'High' ? 'bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)]' :
-                              todo.priority === 'Low' ? 'bg-slate-400' : 'bg-blue-600'
-                            }`}></div>
-                            {todo.priority} Priority
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => deleteTodo(todo.id)}
-                      className="text-slate-300 hover:text-red-600 hover:bg-red-50 p-2.5 rounded-xl transition-all"
-                      title="Remove task"
-                    >
-                      <Trash2 size={20} />
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        
-        <footer className="mt-8 text-center">
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">
-            AU PR Compliance Framework v1.0
-          </p>
-        </footer>
+        {loading && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--muted)" }}>
+            <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+            <span style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace" }}>retrieving clauses...</span>
+          </div>
+        )}
+        <div ref={bottomRef} />
       </div>
+
+      {/* Input */}
+      <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", display: "flex", gap: 8 }}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
+          placeholder="e.g. What rate applies to a 16yo on Sunday?"
+          style={{
+            flex: 1, background: "var(--bg)", border: "1px solid var(--border)",
+            borderRadius: 6, padding: "8px 12px", color: "var(--text)",
+            fontSize: 13, outline: "none",
+          }}
+        />
+        <button
+          onClick={send}
+          disabled={loading || !input.trim()}
+          style={{
+            background: "var(--amber)", border: "none", borderRadius: 6,
+            padding: "8px 14px", cursor: "pointer", display: "flex",
+            alignItems: "center", justifyContent: "center",
+            opacity: loading || !input.trim() ? 0.4 : 1,
+            transition: "opacity 0.15s",
+          }}
+        >
+          <Send size={14} color="#0e0f11" />
+        </button>
+      </div>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+// ── Rate Calculator Panel ────────────────────────────────────────────────────
+
+function RatePanel() {
+  const [form, setForm] = useState({
+    classification: "retail_employee_level_1",
+    employment_type: "full_time",
+    work_date: new Date().toISOString().split("T")[0],
+    start_time: "08:00",
+    end_time: "14:00",
+    age: "",
+  });
+  const [result, setResult] = useState<RateResult | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  function set(k: string, v: string) {
+    setForm((f) => ({ ...f, [k]: v }));
+  }
+
+  async function calculate() {
+    setLoading(true);
+    setResult(null);
+    try {
+      const body: Record<string, unknown> = {
+        classification: form.classification,
+        employment_type: form.employment_type,
+        work_date: form.work_date,
+        start_time: form.start_time,
+        end_time: form.end_time,
+      };
+      if (form.age) body.age = parseInt(form.age);
+
+      const res = await fetch(`${API}/rate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setResult(await res.json());
+    } catch (e) {
+      toast.error("Calculation failed — check inputs");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const selectStyle = {
+    width: "100%", background: "var(--bg)", border: "1px solid var(--border)",
+    borderRadius: 6, padding: "7px 10px", color: "var(--text)", fontSize: 13,
+    outline: "none", appearance: "none" as const,
+  };
+
+  const inputStyle = { ...selectStyle };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflowY: "auto" }}>
+      <div style={{ padding: "20px 20px 0" }}>
+
+        {/* Form grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Classification
+            </label>
+            <div style={{ position: "relative" }}>
+              <select value={form.classification} onChange={(e) => set("classification", e.target.value)} style={selectStyle}>
+                {CLASSIFICATIONS.map((c) => <option key={c} value={c}>{formatLabel(c)}</option>)}
+              </select>
+              <ChevronDown size={12} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", pointerEvents: "none" }} />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Employment Type
+            </label>
+            <div style={{ position: "relative" }}>
+              <select value={form.employment_type} onChange={(e) => set("employment_type", e.target.value)} style={selectStyle}>
+                {EMP_TYPES.map((t) => <option key={t} value={t}>{formatLabel(t)}</option>)}
+              </select>
+              <ChevronDown size={12} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", pointerEvents: "none" }} />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Age (blank = adult)
+            </label>
+            <input type="number" min={14} max={20} value={form.age} onChange={(e) => set("age", e.target.value)} placeholder="e.g. 16" style={inputStyle} />
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Work Date
+            </label>
+            <input type="date" value={form.work_date} onChange={(e) => set("work_date", e.target.value)} style={inputStyle} />
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Start Time
+            </label>
+            <input type="time" value={form.start_time} onChange={(e) => set("start_time", e.target.value)} style={inputStyle} />
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              End Time
+            </label>
+            <input type="time" value={form.end_time} onChange={(e) => set("end_time", e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+
+        <button
+          onClick={calculate}
+          disabled={loading}
+          style={{
+            width: "100%", background: loading ? "var(--border)" : "var(--green)",
+            color: "#0e0f11", border: "none", borderRadius: 6,
+            padding: "9px", fontWeight: 600, fontSize: 13, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            transition: "background 0.15s",
+          }}
+        >
+          {loading ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Calculator size={14} />}
+          {loading ? "Calculating..." : "Calculate Pay"}
+        </button>
+      </div>
+
+      {/* Result */}
+      {result && (
+        <div style={{ margin: "16px 20px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+          {/* Total */}
+          <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Total Pay</span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 26, fontWeight: 500, color: "var(--green)" }}>
+              ${result.total_pay.toFixed(2)}
+            </span>
+          </div>
+
+          {/* Details grid */}
+          <div style={{ padding: "14px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Tag label="Rate / hr" value={`$${result.rate_per_hour.toFixed(4)}`} />
+            <Tag label="Hours" value={`${result.hours_worked}h`} />
+            <Tag label="Multiplier" value={`${result.rate_multiplier}×`} />
+            <Tag label="Day Type" value={formatLabel(result.day_type)} />
+          </div>
+
+          {/* Clause ref */}
+          <div style={{ padding: "10px 20px", borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Award ref</span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "var(--amber)" }}>{result.clause_ref}</span>
+          </div>
+        </div>
+      )}
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+// ── Main Page ────────────────────────────────────────────────────────────────
+
+export default function Home() {
+  const [tab, setTab] = useState<"chat" | "rate">("chat");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", maxWidth: 1100, margin: "0 auto", padding: "0 16px" }}>
+
+      {/* Header */}
+      <header style={{ borderBottom: "1px solid var(--border)", padding: "16px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "var(--amber)", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 2 }}>
+            MA000004
+          </div>
+          <h1 style={{ fontSize: 16, fontWeight: 600, color: "var(--text)", letterSpacing: "-0.01em" }}>
+            General Retail Industry Award
+          </h1>
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {(["chat", "rate"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "6px 14px", borderRadius: 6, border: "1px solid",
+                borderColor: tab === t ? "var(--amber)" : "var(--border)",
+                background: tab === t ? "rgba(245,166,35,0.08)" : "transparent",
+                color: tab === t ? "var(--amber)" : "var(--muted)",
+                fontSize: 12, fontWeight: 500, cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              {t === "chat" ? <MessageSquare size={13} /> : <Calculator size={13} />}
+              {t === "chat" ? "Ask Award" : "Rate Calc"}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {/* Panel */}
+      <main style={{ flex: 1, overflow: "hidden" }}>
+        {tab === "chat" ? <ChatPanel /> : <RatePanel />}
+      </main>
     </div>
   );
 }
